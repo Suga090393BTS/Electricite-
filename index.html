@@ -10,6 +10,7 @@
 <meta name="theme-color" content="#0f1419">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='38' fill='%231a2129'/%3E%3Ctext x='90' y='128' font-size='110' text-anchor='middle'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="data:application/json,%7B%22name%22%3A%22Gestion%20%C3%89lectrique%20N%C2%B07%22%2C%22short_name%22%3A%22%C3%89lectricit%C3%A9%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230f1419%22%2C%22theme_color%22%3A%22%230f1419%22%2C%22start_url%22%3A%22.%22%7D">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <title>Gestion Électrique — N°7 Taverny</title>
 <style>
   :root{
@@ -235,6 +236,15 @@
   @media (max-width:420px){
     .lvl-grid,.audit-grid{grid-template-columns:1fr}
   }
+  /* ===== AIDE / MODALE ===== */
+  .modal{position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:18px;overflow:auto}
+  .modalbox{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px;max-width:440px;width:100%;box-shadow:var(--shadow);max-height:90vh;overflow:auto}
+  .modalbox h2{margin:0 0 6px;font-size:1.3rem}
+  .modalintro{color:var(--mut);font-size:.92rem;margin:0 0 14px}
+  .helplist{list-style:none;padding:0;margin:0 0 14px}
+  .helplist li{padding:9px 0;border-bottom:1px solid var(--line);font-size:.92rem}
+  .modaltip{background:var(--panel2);border-radius:10px;padding:11px 13px;font-size:.88rem;margin:0 0 16px}
+  .modalfoot{color:var(--mut);font-size:.78rem;text-align:center;margin:12px 0 0}
   /* ===== VERROU ===== */
   .lock{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
   .lockbox{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:30px 24px;max-width:340px;width:100%;text-align:center;box-shadow:var(--shadow)}
@@ -242,13 +252,27 @@
   .lockbox h1{font-size:1.2rem;margin:8px 0 2px}
   .lockbox p{color:var(--mut);font-size:.9rem;margin:0 0 16px}
   .lockbox input[type=password]{width:100%;text-align:center;font-size:1.3rem;letter-spacing:.2em;padding:13px;margin-bottom:10px;border-radius:10px}
+  .lockbox input[type=email]{width:100%;text-align:center;font-size:1rem;padding:13px;margin-bottom:10px;border-radius:10px}
   .lockbox button{width:100%;background:var(--acc);color:#fff;border:none;border-radius:10px;padding:14px;font-size:1rem;font-weight:700;cursor:pointer}
+  .lockbox button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line);margin-top:8px}
   .lockerr{color:var(--off);font-size:.85rem;min-height:18px;margin-top:8px}
   .lockrem{display:flex;align-items:center;gap:6px;justify-content:center;font-size:.8rem;color:var(--mut);margin-top:14px}
   .lockrem input{width:auto}
 </style>
 </head>
 <body data-theme="dark">
+<div id="auth" class="lock" style="display:flex">
+  <div class="lockbox">
+    <div class="lockic">⚡</div>
+    <h1>Gestion Électrique</h1>
+    <p>Connectez-vous pour accéder à l'application</p>
+    <input id="authmail" type="email" placeholder="Adresse e-mail" autocomplete="username">
+    <input id="authpw" type="password" placeholder="Mot de passe" autocomplete="current-password">
+    <button id="authlogin">Se connecter</button>
+    <button id="authsignup" class="ghost">Créer un compte</button>
+    <div id="autherr" class="lockerr"></div>
+  </div>
+</div>
 <div id="lock" class="lock" style="display:none">
   <div class="lockbox">
     <div class="lockic">⚡🔒</div>
@@ -260,12 +284,30 @@
     <label class="lockrem"><input type="checkbox" id="lockrem" checked> Rester connecté sur cet appareil</label>
   </div>
 </div>
+<div id="help-ov" class="modal" style="display:none">
+  <div class="modalbox">
+    <h2>Bienvenue 👋</h2>
+    <p class="modalintro">Cette application regroupe toute l'électricité de la maison. Voici à quoi servent les onglets, en haut :</p>
+    <ul class="helplist">
+      <li><b>🔎 Recherche</b> — Tapez un appareil (ex. « congélateur ») pour savoir quel disjoncteur le coupe.</li>
+      <li><b>🏠 Pièces</b> — Choisissez une pièce pour voir ses prises, lumières… et le disjoncteur de chacune.</li>
+      <li><b>🔌 Tableaux</b> — Vos tableaux de fusibles, avec l'état (allumé / coupé) de chaque disjoncteur.</li>
+      <li><b>🗺️ Plan</b> — Le plan de la maison, avec des pastilles que l'on touche.</li>
+      <li><b>⚠️ Audit</b> — La liste des pannes et des points à surveiller.</li>
+      <li><b>⚙️ Réglages</b> — Sauvegarde des données, thème clair/sombre, code d'accès.</li>
+    </ul>
+    <p class="modaltip">✏️ Pour <b>modifier</b> une information, ouvrez une fiche puis touchez le bouton « Modifier ». Sans ça, vous ne risquez jamais de changer quelque chose par erreur.</p>
+    <button id="help-close" class="btn" style="width:100%">C'est parti</button>
+    <p class="modalfoot">Vous pourrez revoir cette aide en touchant le bouton « ? » en haut.</p>
+  </div>
+</div>
 <header>
   <div class="brand"><span class="bolt">⚡</span> Gestion Électrique <span class="sub" id="hsub">N°7 Taverny · v.02</span></div>
   <div class="search">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
     <input id="q" type="search" placeholder="Rechercher : pièce, appareil, prise (P5), disjoncteur (D9), tableau (TSS)…" autocomplete="off">
   </div>
+  <button class="iconbtn" id="help" title="Aide">?</button>
   <button class="iconbtn" id="theme" title="Thème clair/sombre">◐</button>
 </header>
 
@@ -299,7 +341,7 @@
    🔒 CODE D'ACCÈS — changez la valeur ci-dessous puis ré-uploadez
    index.html sur GitHub. Mettez "" (vide) pour désactiver le verrou.
    ================================================================ */
-const ACCESS_CODE = "0707";
+const ACCESS_CODE = "";
 
 /* ============================ RÉFÉRENTIELS ============================ */
 const TYPES={P:"Prise",L:"Lumière",I:"Interrupteur",V:"Volet roulant",C:"Climatiseur",A:"Alarme",
@@ -627,6 +669,10 @@ document.querySelectorAll('.tab').forEach(tb=>tb.onclick=()=>{
 function gotoTab(name){document.querySelector(`.tab[data-tab="${name}"]`).click();}
 $('#theme').onclick=()=>{const b=document.body;b.dataset.theme=b.dataset.theme==='dark'?'light':'dark';
   localStorage.setItem('elec_theme',b.dataset.theme);};
+/* AIDE */
+$('#help').onclick=()=>{$('#help-ov').style.display='flex';};
+$('#help-close').onclick=()=>{$('#help-ov').style.display='none';localStorage.setItem('elec_seen_help','1');};
+function maybeHelp(){if(!localStorage.getItem('elec_seen_help'))$('#help-ov').style.display='flex';}
 
 /* ============================ PIÈCES ============================ */
 function renderRooms(){
@@ -947,10 +993,10 @@ function renderSettings(){
   cs.append(el('div','desc',ACCESS_CODE
     ?'Un code d\'accès est demandé à l\'ouverture. Pour le changer, modifiez la ligne « ACCESS_CODE » en haut du fichier index.html puis ré-uploadez-le sur GitHub.'
     :'Aucun code d\'accès n\'est défini (verrou désactivé).'));
-  const lk=el('button','btn ghost','🔒 Verrouiller maintenant (déconnexion)');
-  lk.onclick=()=>{localStorage.removeItem('elec_unlocked');location.reload();};
-  cs.append(lk);
-  cs.append(el('div','desc','Note : ce code empêche l\'accès occasionnel mais n\'est pas un chiffrement. Ne publiez pas l\'adresse publiquement si les plans doivent rester privés.'));
+  const so=el('button','btn ghost','🚪 Se déconnecter');
+  so.onclick=()=>{if(confirm('Se déconnecter de l\'application ?'))signOut();};
+  cs.append(so);
+  cs.append(el('div','desc','Connexion par e-mail (Supabase), comme vos applis budget et cheptel. Seules les adresses autorisées peuvent accéder.'));
   v.append(cs);
 
   /* Sauvegarde */
@@ -1209,25 +1255,76 @@ window.addEventListener('beforeunload',e=>{if(DIRTY)save();});
 setInterval(()=>{if(DIRTY)save();},4000);
 
 /* ============================ INIT ============================ */
+/* ===== CONNEXION PAR E-MAIL (Supabase, comme budget/cheptel) ===== */
+const SUPA_URL = "https://efyxufdtrgcgzpfhrmwh.supabase.co";
+const SUPA_KEY = "sb_publishable_Bc6FUEQBIsF7ciMiREHJVw_N99uh1jp";
+/* E-mails autorisés. Laissez le tableau VIDE [] pour autoriser n'importe quel e-mail. */
+const ALLOWED_EMAILS = ["manonbrousse.co@gmail.com","brf.ete@gmail.com","alvabien56@gmail.com"];
+let supa=null;
+function emailOK(e){if(!ALLOWED_EMAILS.length)return true;return ALLOWED_EMAILS.map(x=>x.toLowerCase()).includes(String(e||'').toLowerCase());}
+async function setupAuth(){
+  const ov=$('#auth');
+  if(!window.supabase){ if(ov)ov.style.display='none'; return; } /* hors-ligne / lib absente : ne pas bloquer */
+  try{ supa=window.supabase.createClient(SUPA_URL,SUPA_KEY); }catch(e){ ov.style.display='none'; return; }
+  try{
+    const {data:{session}}=await supa.auth.getSession();
+    const user=session&&session.user;
+    if(user&&emailOK(user.email)){ ov.style.display='none'; return; }
+    if(user&&!emailOK(user.email)){ await supa.auth.signOut(); }
+  }catch(e){}
+  showAuth();
+}
+function showAuth(){
+  const ov=$('#auth');ov.style.display='flex';
+  const mail=$('#authmail'),pw=$('#authpw'),err=$('#autherr'),login=$('#authlogin'),signup=$('#authsignup');
+  const setErr=m=>{err.style.color=m.ok?'var(--ok)':'var(--off)';err.textContent=m.t||m;};
+  login.onclick=async()=>{
+    err.textContent='';const e=mail.value.trim(),p=pw.value;
+    if(!e||!p){setErr('Entrez votre e-mail et votre mot de passe.');return;}
+    if(!emailOK(e)){setErr("Cette adresse n'est pas autorisée.");return;}
+    login.disabled=true;login.textContent='Connexion…';
+    const {error}=await supa.auth.signInWithPassword({email:e,password:p});
+    login.disabled=false;login.textContent='Se connecter';
+    if(error){setErr('E-mail ou mot de passe incorrect (ou compte non confirmé).');return;}
+    ov.style.display='none';
+  };
+  signup.onclick=async()=>{
+    err.textContent='';const e=mail.value.trim(),p=pw.value;
+    if(!e||!p){setErr('Entrez un e-mail et un mot de passe (6 caractères min).');return;}
+    if(!emailOK(e)){setErr("Cette adresse n'est pas autorisée.");return;}
+    if(p.length<6){setErr('Le mot de passe doit faire au moins 6 caractères.');return;}
+    signup.disabled=true;signup.textContent='Création…';
+    const {error}=await supa.auth.signUp({email:e,password:p});
+    signup.disabled=false;signup.textContent='Créer un compte';
+    if(error){setErr(error.message||'Erreur lors de la création.');return;}
+    setErr({ok:1,t:'Compte créé ! Vérifiez votre e-mail pour confirmer, puis connectez-vous.'});
+  };
+  pw.addEventListener('keydown',ev=>{if(ev.key==='Enter')login.click();});
+}
+async function signOut(){ if(supa){try{await supa.auth.signOut();}catch(e){}} location.reload(); }
 function setupLock(){
-  if(!ACCESS_CODE){return;}
-  if(localStorage.getItem('elec_unlocked')==='1'){return;}
+  if(!ACCESS_CODE){return false;}
+  if(localStorage.getItem('elec_unlocked')==='1'){return false;}
   const lock=$('#lock');lock.style.display='flex';
   const tryit=()=>{const v=$('#lockcode').value;
-    if(v===ACCESS_CODE){if($('#lockrem').checked)localStorage.setItem('elec_unlocked','1');lock.style.display='none';}
+    if(v===ACCESS_CODE){if($('#lockrem').checked)localStorage.setItem('elec_unlocked','1');lock.style.display='none';maybeHelp();}
     else{$('#lockerr').textContent='Code incorrect';$('#lockcode').value='';$('#lockcode').focus();}};
   $('#lockbtn').onclick=tryit;
   $('#lockcode').addEventListener('keydown',e=>{if(e.key==='Enter')tryit();});
   setTimeout(()=>$('#lockcode').focus(),120);
+  return true;
 }
 (function init(){
-  setupLock();
+  setupAuth();
+  const locked=setupLock();
   if(!STATE.plans)STATE.plans={};
   migratePlans();
   const th=localStorage.getItem('elec_theme');if(th)document.body.dataset.theme=th;
   rebuild();updateHeader();renderSuggested();
-  if('serviceWorker' in navigator && location.protocol.indexOf('http')===0)
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if(!locked)maybeHelp();
+  if('serviceWorker' in navigator)
+    navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
+  if(window.caches&&caches.keys)caches.keys().then(ks=>ks.forEach(k=>caches.delete(k))).catch(()=>{});
 })();
 </script>
 </body>
