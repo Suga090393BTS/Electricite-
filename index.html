@@ -1259,7 +1259,7 @@ setInterval(()=>{if(DIRTY)save();},4000);
 const SUPA_URL = "https://efyxufdtrgcgzpfhrmwh.supabase.co";
 const SUPA_KEY = "sb_publishable_Bc6FUEQBIsF7ciMiREHJVw_N99uh1jp";
 /* E-mails autorisés. Laissez le tableau VIDE [] pour autoriser n'importe quel e-mail. */
-const ALLOWED_EMAILS = ["manonbrousse.co@gmail.com","brf.ete@gmail.com","alvabien56@gmail.com"];
+const ALLOWED_EMAILS = ["manonbrousse.co+elec@gmail.com","manonbrousse.co@gmail.com","brf.ete@gmail.com","alvabien56@gmail.com"];
 let supa=null;
 function emailOK(e){if(!ALLOWED_EMAILS.length)return true;return ALLOWED_EMAILS.map(x=>x.toLowerCase()).includes(String(e||'').toLowerCase());}
 async function setupAuth(){
