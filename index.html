@@ -127,6 +127,12 @@
   .edit-row input[type=number]{width:62px}
   .edit-row select{width:130px}
   .edit-row input.ids{flex:1;min-width:120px}
+  .pcount{background:var(--chip);border:1px solid var(--line);color:var(--txt);border-radius:6px;
+    height:30px;padding:0 8px;cursor:pointer;font-size:.72rem;white-space:nowrap}
+  .pcount.actif{border-color:var(--acc);color:var(--acc)}
+  .dj-pieces{margin:0 0 10px 0;padding:10px 12px;background:var(--panel2);
+    border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:8px}
+  .pfixe{font-size:.68rem;color:var(--mut);align-self:center}
   .x{background:var(--off);color:#fff;border:none;border-radius:6px;width:28px;height:30px;cursor:pointer;font-weight:700}
   .mv{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;width:26px;height:30px;cursor:pointer;font-size:.7rem;padding:0}
   .mv:hover{border-color:var(--acc)}
@@ -693,6 +699,27 @@ function seedDiffs(){
   });
 }
 function djList(code){return STATE.boardDj[code]||[];}
+/* Une correspondance de pièce peut viser un disjoncteur seul (« D12 ») ou un bloc (« D4→7 »).
+   corrCouvre dit si la référence englobe le disjoncteur n. */
+function corrCouvre(ref,n){
+  const t=String(ref||'').replace(/^D/i,'').trim();
+  const m=t.match(/^(\d+)\s*(?:→|->|–|—|-)\s*(\d+)$/);
+  if(m&&/^\d+$/.test(String(n))){
+    const a=+m[1],b=+m[2],x=+n;return x>=Math.min(a,b)&&x<=Math.max(a,b);
+  }
+  return t.toLowerCase()===String(n).toLowerCase();
+}
+/* Toutes les pièces alimentées par le disjoncteur n du tableau code.
+   exact=true : la correspondance ne vise que ce disjoncteur (donc modifiable ici). */
+function piecesDuDj(code,n){
+  const out=[];
+  STATE.rooms.forEach(r=>{(r.corr||[]).forEach((c,i)=>{
+    if(c[1]!==code)return;
+    const exact=String(c[0]||'').replace(/^D/i,'').trim().toLowerCase()===String(n).toLowerCase();
+    if(exact||corrCouvre(c[0],n))out.push({r,c,i,exact});
+  });});
+  return out;
+}
 function diffList(code){if(!STATE.boardDiff)STATE.boardDiff={};if(!STATE.boardDiff[code])STATE.boardDiff[code]=[];return STATE.boardDiff[code];}
 function diffById(code,id){return diffList(code).find(x=>x.id===id);}
 /* Étiquette courte affichée sur le disjoncteur du schéma, et étiquette complète pour l'infobulle. */
@@ -890,7 +917,7 @@ function renderBoards(){
     card.onclick=()=>openBoard(code);v.append(card);
   });
 }
-let BEDIT=false;
+let BEDIT=false,DJ_OPEN=null,DJ_ADD=null;
 function openBoard(codeRaw,bedit){
   gotoTab('boards');BEDIT=!!bedit;
   let code=codeRaw;if(!BOARDS[code]){const k=Object.keys(BOARDS).find(x=>String(codeRaw).includes(x));if(k)code=k;}
@@ -966,7 +993,11 @@ function makeBrk(code,d){
   const dd=diffById(code,d.gid);
   const tip=`<b>D${d.n}</b> — ${s==='on'?'sous tension':s==='off'?'coupé':'libre'}`+(d.tri?` · <b>triphasé (bloc ${d.tri})</b>`:'')+
     (dd?`<br><span style="opacity:.7">${dd.nm}${dd.s==='off'?' — <b style="color:var(--off)">ligne coupée</b>':''}</span>`:'')+
-    `<br>${d.f}<br><span style="opacity:.7">${djType(d)}</span>`+(d.c?`<br>⚠ ${d.c}`:'');
+    `<br>${d.f}<br><span style="opacity:.7">${djType(d)}</span>`+
+    (()=>{const p=piecesDuDj(code,d.n);if(!p.length)return '';
+      const l=p.slice(0,12).map(x=>`<b>${x.r.nm}</b> : ${x.c[2]||'—'}`).join('<br>');
+      return '<br><br>'+l+(p.length>12?`<br><span style="opacity:.7">… et ${p.length-12} autre(s)</span>`:'');})()+
+    (d.c?`<br>⚠ ${d.c}`:'');
   brk.addEventListener('mousemove',ev=>showTip(ev,tip));
   brk.addEventListener('mouseleave',hideTip);
   brk.onclick=ev=>{
@@ -978,6 +1009,55 @@ function makeBrk(code,d){
 function showTip(ev,html){const t=$('#tip');t.innerHTML=html;t.style.display='block';
   let x=ev.clientX+14,y=ev.clientY+14;if(x>innerWidth-250)x=ev.clientX-250;t.style.left=x+'px';t.style.top=y+'px';}
 function hideTip(){$('#tip').style.display='none';}
+
+/* éditeur des pièces alimentées par un disjoncteur (écrit dans room.corr, comme la fiche pièce) */
+function buildPiecesEditor(code,d){
+  const box=el('div','dj-pieces');
+  box.append(el('div','hint','Pièces alimentées par <b>D'+d.n+'</b>. Ajoutez-en autant que nécessaire et précisez ce qui est branché dessus (ex. « P1→P5 – L1 »). C\'est la même information que dans la fiche de la pièce : la modifier ici la met à jour des deux côtés.'));
+  const liens=piecesDuDj(code,d.n);
+  const tri=STATE.rooms.slice().sort((a,b)=>a.nm.localeCompare(b.nm,'fr'));
+  liens.forEach(({r,c,i,exact})=>{
+    const row=el('div','edit-row');
+    const sel=el('select');sel.style.width='170px';sel.disabled=!exact;
+    tri.forEach(rr=>{const o=el('option',null,rr.nm);o.value=rr.c;if(rr.c===r.c)o.selected=true;sel.append(o);});
+    const al=el('input','ids');al.type='text';al.value=c[2]||'';al.placeholder='P1→P5 – L1';al.disabled=!exact;
+    const del=el('button','x','✕');
+    if(exact){
+      sel.onchange=()=>{const cible=STATE.rooms.find(x=>x.c===sel.value);if(!cible)return;
+        r.corr.splice(i,1);cible.corr.push(['D'+d.n,code,c[2]||'']);markDirty();openBoard(code,true);};
+      al.oninput=()=>{c[2]=al.value;markDirty();};
+      del.onclick=()=>{if(confirm('Retirer « '+r.nm+' » de D'+d.n+' ?')){r.corr.splice(i,1);markDirty();openBoard(code,true);}};
+    }else{
+      del.disabled=true;del.style.opacity='.35';
+      del.title='Lien groupé — à modifier depuis la fiche de la pièce';
+    }
+    row.append(sel,al,del);
+    if(!exact)row.append(el('span','pfixe','groupé via '+c[0]));
+    box.append(row);
+  });
+  const cleAjout=code+'|'+d.n;
+  if(!liens.length&&DJ_ADD!==cleAjout)box.append(el('div','note','Aucune pièce rattachée pour l\'instant.'));
+  if(DJ_ADD===cleAjout){
+    /* Ligne d'ajout en attente : rien n'est écrit tant que la pièce n'est pas choisie. */
+    const row=el('div','edit-row');
+    const sel=el('select');sel.style.width='170px';
+    {const o=el('option',null,'— choisir une pièce —');o.value='';o.selected=true;sel.append(o);}
+    tri.forEach(rr=>{const o=el('option',null,rr.nm);o.value=rr.c;sel.append(o);});
+    const al=el('input','ids');al.type='text';al.placeholder='P1→P5 – L1';
+    const annul=el('button','x','✕');annul.title='Annuler l\'ajout';
+    sel.onchange=()=>{const cible=STATE.rooms.find(x=>x.c===sel.value);if(!cible)return;
+      if(!cible.corr)cible.corr=[];
+      cible.corr.push(['D'+d.n,code,al.value||'']);DJ_ADD=null;markDirty();openBoard(code,true);};
+    annul.onclick=()=>{DJ_ADD=null;openBoard(code,true);};
+    row.append(sel,al,annul);box.append(row);
+    box.append(el('div','hint','Choisissez la pièce dans la liste pour valider l\'ajout.'));
+  }else{
+    const add=el('button','btn ghost sm','＋ Ajouter une pièce');
+    add.onclick=()=>{DJ_ADD=cleAjout;openBoard(code,true);};
+    box.append(add);
+  }
+  return box;
+}
 
 /* éditeur des différentiels d'un tableau */
 function buildDiffEditor(code){
@@ -1028,7 +1108,7 @@ function buildDjEditor(code){
   wrap.append(el('div','hint','Modifiez n°, différentiel, type (modèle / calibre / tension), état et ce qu\'il alimente. Utilisez <b>▲▼</b> pour réordonner un disjoncteur. Pour relier des disjoncteurs en <b>triphasé</b>, donnez-leur le même nom de <b>bloc 3~</b> (ex. « 2E ») — ils apparaîtront encadrés ensemble sur le schéma (à condition d\'être consécutifs). Laissez vide pour du monophasé.'));
   const list=djList(code);
   const head=el('div','edit-row');head.style.cssText='font-size:.7rem;color:var(--mut);font-weight:700;text-transform:uppercase';
-  head.innerHTML='<span style="width:64px">N°</span><span style="width:150px">Différentiel</span><span style="width:84px">Modèle</span><span style="width:72px">Calibre</span><span style="width:72px">Tension</span><span style="width:80px">État</span><span style="width:72px">Bloc 3~</span><span style="flex:1;min-width:110px">Alimente</span><span style="width:28px"></span>';
+  head.innerHTML='<span style="width:64px">N°</span><span style="width:150px">Différentiel</span><span style="width:84px">Modèle</span><span style="width:72px">Calibre</span><span style="width:72px">Tension</span><span style="width:80px">État</span><span style="width:72px">Bloc 3~</span><span style="flex:1;min-width:110px">Alimente (résumé)</span><span style="width:56px">Pièces</span><span style="width:28px"></span>';
   wrap.append(head);
   list.forEach((d,i)=>{
     const row=el('div','edit-row');
@@ -1057,7 +1137,12 @@ function buildDjEditor(code){
     up.onclick=()=>{[list[i-1],list[i]]=[list[i],list[i-1]];markDirty();openBoard(code,true);};
     down.onclick=()=>{[list[i+1],list[i]]=[list[i],list[i+1]];markDirty();openBoard(code,true);};
     del.onclick=()=>{if(confirm('Supprimer le disjoncteur D'+d.n+' ?')){list.splice(i,1);markDirty();openBoard(code,true);}};
-    row.append(n,g,km,kc,kv,s,tri,f,up,down,del);wrap.append(row);
+    const cle=code+'|'+d.n,ouvert=DJ_OPEN===cle;
+    const pb=el('button','pcount'+(ouvert?' actif':''),'🏠 '+piecesDuDj(code,d.n).length);
+    pb.title='Pièces alimentées par ce disjoncteur';
+    pb.onclick=()=>{DJ_OPEN=ouvert?null:cle;DJ_ADD=null;openBoard(code,true);};
+    row.append(n,g,km,kc,kv,s,tri,f,pb,up,down,del);wrap.append(row);
+    if(ouvert)wrap.append(buildPiecesEditor(code,d));
   });
   const add=el('button','btn ghost sm','＋ Ajouter un disjoncteur');
   add.onclick=()=>{const last=list[list.length-1];
@@ -1200,7 +1285,7 @@ function buildIndex(){
   Object.entries(BOARDS).forEach(([c,b])=>{
     idx.push({kind:"Tableau",ic:"🔌",t:c+" — "+b.nm,d:"📍 "+b.loc,blob:(c+' '+b.nm+' '+b.loc+' '+b.spec).toLowerCase(),act:()=>openBoard(c)});
     djList(c).forEach(d=>idx.push({kind:"Disjoncteur",ic:"⚡",t:"D"+d.n+" ("+c+")",d:d.f,
-      blob:("d"+d.n+' '+c+' '+d.f+' '+djType(d)).toLowerCase(),act:()=>openBoard(c)}));
+      blob:("d"+d.n+' '+c+' '+d.f+' '+djType(d)+' '+piecesDuDj(c,d.n).map(p=>p.r.nm+' '+(p.c[2]||'')).join(' ')).toLowerCase(),act:()=>openBoard(c)}));
   });
   return idx;
 }
