@@ -137,7 +137,15 @@
   .diffgroup:last-child{margin-bottom:0}
   .diff-label{font-size:.72rem;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;
     margin-bottom:8px;display:flex;align-items:center;gap:8px}
-  .diff-label .mainsw{width:30px;height:14px;border-radius:7px;background:var(--ok)}
+  .diff-label .mainsw{width:30px;height:14px;border-radius:7px;background:var(--ok);flex:none;cursor:pointer;
+    border:1px solid transparent;transition:background .15s}
+  .diff-label .mainsw:hover{border-color:var(--acc)}
+  .diff-label .mainsw.off{background:var(--off)}
+  .diff-label .dspec{font-weight:600;text-transform:none;letter-spacing:0;opacity:.75}
+  .diff-off-tag{background:rgba(248,81,73,.16);color:var(--off);border-radius:5px;padding:1px 6px;font-size:.65rem}
+  .diffgroup.diffoff{border-left:3px solid var(--off);padding-left:10px;border-radius:4px;background:rgba(248,81,73,.05)}
+  .diffgroup.diffoff .diff-label{color:var(--off)}
+  .diffgroup.diffoff .rail{opacity:.5}
   .rail{display:flex;gap:5px;background:linear-gradient(var(--panel) 0 0) center/100% 6px no-repeat;
     padding:6px 0;flex-wrap:wrap}
   .brk{width:46px;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:5px 3px;
@@ -313,7 +321,8 @@
 </header>
 
 <nav class="tabs">
-  <button class="tab active" data-tab="search">🔎 Recherche</button>
+  <button class="tab active" data-tab="home">📊 Accueil</button>
+  <button class="tab" data-tab="search">🔎 Recherche</button>
   <button class="tab" data-tab="rooms">🏠 Pièces</button>
   <button class="tab" data-tab="boards">🔌 Tableaux</button>
   <button class="tab" data-tab="plan">🗺️ Plan</button>
@@ -322,7 +331,8 @@
 </nav>
 
 <main>
-  <section class="view active" id="view-search">
+  <section class="view active" id="view-home"></section>
+  <section class="view" id="view-search">
     <p class="hint">Dépannage : tapez un appareil (<b>« réfrigérateur »</b>), une prise (<b>« P5 buanderie »</b>), un disjoncteur (<b>« D9 »</b>) ou une pièce.</p>
     <div id="results"></div>
   </section>
@@ -619,7 +629,7 @@ const TOTALS=[["Prises",129],["Lumières",102],["Interrupteurs",53],["Volets",14
 /* ============================ ÉTAT / PERSISTANCE ============================ */
 const STORE="elec_n7_v2";
 function freshState(){return{rooms:JSON.parse(JSON.stringify(ROOMS_DEFAULT)),
-  boardDj:JSON.parse(JSON.stringify(BOARD_DJ_DEFAULT)),faultsDone:{},
+  boardDj:JSON.parse(JSON.stringify(BOARD_DJ_DEFAULT)),boardDiff:{},faultsDone:{},
   house:{name:"N°7 Taverny",ver:"02",updated:"04/02/2026"},plans:{}};}
 function migratePlans(){
   if(!STATE.boardDj)STATE.boardDj=JSON.parse(JSON.stringify(BOARD_DJ_DEFAULT));
@@ -636,8 +646,58 @@ function migratePlans(){
       if(i>=0){const g=t[i].g,s=t[i].s;t[i].tri='Inconnu';if(!t[i].f||/non identifié/i.test(t[i].f))t[i].f='Inconnu (400V)';
         t.splice(i+1,0,{n:'34',g,k:'—',s,tri:'Inconnu',f:'Inconnu'},{n:'35',g,k:'—',s,tri:'Inconnu',f:'Inconnu'},{n:'36',g,k:'—',s,tri:'Inconnu',f:'Inconnu'});}}
     STATE._triSeed=3;}
+  if(!STATE._diffSeed){seedDiffs();STATE._diffSeed=1;}
+}
+/* Modèles de disjoncteurs reconnus pour découper l'ancien champ « type » (« C60N C16 » -> C60N + C16). */
+const DJ_MODELES=['C60N','C120N','DNX3','DT40','S91N','DPN','Déclic','Declic','DX3','ID'];
+function splitType(k){
+  const t=String(k||'').replace(/[—–]+/g,' ').trim();
+  if(!t)return{km:'',kc:''};
+  let km='',kc='';
+  t.split(/\s+/).filter(Boolean).forEach(tok=>{
+    const mod=DJ_MODELES.find(m=>m.toLowerCase()===tok.toLowerCase());
+    if(mod&&!km){km=mod;return;}
+    if(/^C?\d+\s*A?$/i.test(tok)&&!kc){kc=tok.toUpperCase();return;}
+    if(!km)km=tok;else if(!kc)kc=tok;
+  });
+  return{km,kc};
+}
+/* Crée les différentiels de chaque tableau à partir des anciens libellés de groupe,
+   rattache chaque disjoncteur au sien (gid) et découpe son type en modèle/calibre/tension. */
+function seedDiffs(){
+  if(!STATE.boardDiff)STATE.boardDiff={};
+  Object.keys(STATE.boardDj).forEach(code=>{
+    const list=STATE.boardDj[code];if(!list)return;
+    if(!STATE.boardDiff[code])STATE.boardDiff[code]=[];
+    const diffs=STATE.boardDiff[code];
+    const spec=(BOARDS[code]&&BOARDS[code].spec)||'';
+    list.forEach(d=>{
+      if(d.km===undefined&&d.kc===undefined){const p=splitType(d.k);d.km=p.km;d.kc=p.kc;}
+      if(d.kv===undefined)d.kv=d.tri?'400V':'230V';
+      const label=String(d.g||'').trim();
+      if(!label)return;
+      let dd=diffs.find(x=>x.raw===label);
+      if(!dd){
+        const num=label.match(/DIFF\.?\s*(\d+)(?![\dA-Za-z])/i);
+        const cal=(label.match(/(\d+)\s*A\b/i)||spec.match(/(\d+)\s*A\b/i)||[])[1];
+        const sens=(label.match(/(\d+)\s*mA\b/i)||spec.match(/(\d+)\s*mA\b/i)||[])[1];
+        dd={id:'d'+(diffs.length+1),
+            nm:num?('Différentiel '+num[1]):label,
+            cal:cal?cal+'A':'',sens:sens?sens+'mA':'',typ:'',
+            obs:num?label.replace(/^DIFF\.?\s*\d+\s*[—–-]*\s*/i,'').replace(/\d+\s*mA\b/ig,'').replace(/\d+\s*A\b/ig,'').replace(/^[\s—–-]+|[\s—–-]+$/g,'').trim():'',
+            s:'on',raw:label};
+        diffs.push(dd);
+      }
+      d.gid=dd.id;
+    });
+  });
 }
 function djList(code){return STATE.boardDj[code]||[];}
+function diffList(code){if(!STATE.boardDiff)STATE.boardDiff={};if(!STATE.boardDiff[code])STATE.boardDiff[code]=[];return STATE.boardDiff[code];}
+function diffById(code,id){return diffList(code).find(x=>x.id===id);}
+/* Étiquette courte affichée sur le disjoncteur du schéma, et étiquette complète pour l'infobulle. */
+function djCal(d){return [d.km,d.kc].filter(x=>x&&x!=='—').join(' ')||(d.k&&d.k!=='—'?d.k:'');}
+function djType(d){return [d.km,d.kc,d.kv].filter(x=>x&&x!=='—').join(' ')||(d.k&&d.k!=='—'?d.k:'');}
 let STATE=(()=>{try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&s.rooms)return s;}catch(e){}return freshState();})();
 let DIRTY=false;
 function save(){try{localStorage.setItem(STORE,JSON.stringify(STATE));}catch(e){}DIRTY=false;$('#savebar').classList.remove('show');}
@@ -646,6 +706,25 @@ function rebuild(){ROOM_BY_CODE={};STATE.rooms.forEach(r=>ROOM_BY_CODE[r.c]=r);I
 let ROOM_BY_CODE={},INDEX=[];
 function djState(code,n){const b=djList(code).find(x=>x.n===n);return b?b.s:'on';}
 function setDj(code,n,s){const b=djList(code).find(x=>x.n===n);if(b){b.s=s;markDirty();}}
+/* Coupe / remonte un différentiel. À la coupure, tous ses disjoncteurs passent à OFF
+   (leur état est mémorisé) ; à la remontée, l'app propose de les remettre comme avant. */
+function setDiffState(code,id,s){
+  const dd=diffById(code,id);if(!dd)return;
+  const membres=djList(code).filter(x=>x.gid===id);
+  if(s==='off'){
+    dd._snap={};
+    membres.forEach(b=>{dd._snap[b.n]=b.s;if(b.s==='on')b.s='off';});
+    dd.s='off';
+    toast('Différentiel coupé — '+membres.length+' disjoncteur(s) sur OFF');
+  }else{
+    dd.s='on';
+    const snap=dd._snap;
+    if(snap&&Object.keys(snap).length&&confirm('Différentiel remonté.\n\nRemettre les '+membres.length+' disjoncteurs dans l\'état qu\'ils avaient avant la coupure ?'))
+      membres.forEach(b=>{if(snap[b.n])b.s=snap[b.n];});
+    delete dd._snap;
+  }
+  markDirty();
+}
 
 /* ============================ HELPERS ============================ */
 const $=s=>document.querySelector(s);
@@ -659,6 +738,7 @@ document.querySelectorAll('.tab').forEach(tb=>tb.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
   tb.classList.add('active');$('#view-'+tb.dataset.tab).classList.add('active');
+  if(tb.dataset.tab==='home')renderHome();
   if(tb.dataset.tab==='rooms')renderRooms();
   if(tb.dataset.tab==='boards')renderBoards();
   if(tb.dataset.tab==='plan')renderPlan();
@@ -831,12 +911,25 @@ function openBoard(codeRaw,bedit){
 
   /* SCHÉMA (rail DIN groupé par différentiel) */
   const board=el('div','board');
-  const groups=[...new Set(djList(code).map(d=>d.g))];
-  groups.forEach(g=>{
-    const grp=el('div','diffgroup');
-    grp.append(el('div','diff-label',`<span class="mainsw"></span>${g}`));
+  const groupes=diffList(code).map(dd=>({dd,arr:djList(code).filter(d=>d.gid===dd.id)}));
+  const orphelins=djList(code).filter(d=>!d.gid||!diffById(code,d.gid));
+  if(orphelins.length)groupes.push({dd:null,arr:orphelins});
+  groupes.forEach(({dd,arr})=>{
+    if(!arr.length&&!BEDIT)return;
+    const coupe=!!(dd&&dd.s==='off');
+    const grp=el('div','diffgroup'+(coupe?' diffoff':''));
+    const lab=el('div','diff-label');
+    const sw=el('span','mainsw'+(coupe?' off':''));
+    if(dd){
+      sw.title=(coupe?'Remonter':'Couper')+' ce différentiel';
+      sw.onclick=ev=>{ev.stopPropagation();setDiffState(code,dd.id,coupe?'on':'off');openBoard(code,BEDIT);};
+    }else{sw.style.cursor='default';sw.style.background='var(--libre)';sw.title='Disjoncteurs sans différentiel';}
+    lab.append(sw,el('span',null,dd?(dd.nm||dd.id):'Sans différentiel'));
+    const spec=dd?[dd.cal,dd.sens,dd.typ?'type '+dd.typ:'',dd.obs].filter(Boolean).join(' · '):'';
+    if(spec)lab.append(el('span','dspec',spec));
+    if(coupe)lab.append(el('span','diff-off-tag','LIGNE COUPÉE'));
+    grp.append(lab);
     const rail=el('div','rail');
-    const arr=djList(code).filter(d=>d.g===g);
     let i=0;
     while(i<arr.length){
       const d=arr[i];
@@ -851,7 +944,7 @@ function openBoard(codeRaw,bedit){
   v.append(board);
 
   /* ÉDITEUR de disjoncteurs */
-  if(BEDIT){v.append(buildDjEditor(code));return;}
+  if(BEDIT){v.append(buildDiffEditor(code));v.append(buildDjEditor(code));return;}
 
   /* Pièces alimentées */
   const fed=STATE.rooms.filter(r=>r.corr.some(c=>c[1]===code));
@@ -868,9 +961,12 @@ function openBoard(codeRaw,bedit){
 function makeBrk(code,d){
   const s=djState(code,d.n);
   const brk=el('div','brk '+s);
-  brk.innerHTML=`<div class="num">D${d.n}</div><div class="sw"><div class="lever"></div></div><div class="cal">${d.k||''}</div>`+
+  brk.innerHTML=`<div class="num">D${d.n}</div><div class="sw"><div class="lever"></div></div><div class="cal">${djCal(d)}</div>`+
     (d.c?'<div class="conflict-badge">!</div>':'');
-  const tip=`<b>D${d.n}</b> — ${s==='on'?'sous tension':s==='off'?'coupé':'libre'}`+(d.tri?` · <b>triphasé (bloc ${d.tri})</b>`:'')+`<br>${d.f}<br><span style="opacity:.7">${d.k||''}</span>`+(d.c?`<br>⚠ ${d.c}`:'');
+  const dd=diffById(code,d.gid);
+  const tip=`<b>D${d.n}</b> — ${s==='on'?'sous tension':s==='off'?'coupé':'libre'}`+(d.tri?` · <b>triphasé (bloc ${d.tri})</b>`:'')+
+    (dd?`<br><span style="opacity:.7">${dd.nm}${dd.s==='off'?' — <b style="color:var(--off)">ligne coupée</b>':''}</span>`:'')+
+    `<br>${d.f}<br><span style="opacity:.7">${djType(d)}</span>`+(d.c?`<br>⚠ ${d.c}`:'');
   brk.addEventListener('mousemove',ev=>showTip(ev,tip));
   brk.addEventListener('mouseleave',hideTip);
   brk.onclick=ev=>{
@@ -883,20 +979,66 @@ function showTip(ev,html){const t=$('#tip');t.innerHTML=html;t.style.display='bl
   let x=ev.clientX+14,y=ev.clientY+14;if(x>innerWidth-250)x=ev.clientX-250;t.style.left=x+'px';t.style.top=y+'px';}
 function hideTip(){$('#tip').style.display='none';}
 
+/* éditeur des différentiels d'un tableau */
+function buildDiffEditor(code){
+  const wrap=el('div','block');
+  wrap.append(el('h4',null,'Différentiels du tableau (édition)'));
+  wrap.append(el('div','hint','Un différentiel protège toute une ligne. Le mettre sur <b>OFF</b> bascule <b>tous ses disjoncteurs sur OFF</b> et affiche le groupe en rouge sur le schéma ; en le remettant sur ON, l\'app propose de restaurer leur état d\'avant la coupure. Vous pouvez aussi cliquer directement la pastille du différentiel sur le schéma.'));
+  const list=diffList(code);
+  const head=el('div','edit-row');head.style.cssText='font-size:.7rem;color:var(--mut);font-weight:700;text-transform:uppercase';
+  head.innerHTML='<span style="width:150px">Nom</span><span style="width:70px">Calibre</span><span style="width:76px">Sensib.</span><span style="width:74px">Type</span><span style="flex:1;min-width:110px">Repère</span><span style="width:78px">État</span><span style="width:28px"></span>';
+  wrap.append(head);
+  if(!list.length)wrap.append(el('div','note','Aucun différentiel enregistré pour ce tableau. Ajoutez-en un ci-dessous.'));
+  list.forEach((dd,i)=>{
+    const row=el('div','edit-row');
+    const nm=el('input');nm.type='text';nm.value=dd.nm||'';nm.style.width='150px';nm.placeholder='Différentiel 1';
+    const cal=el('input');cal.type='text';cal.value=dd.cal||'';cal.style.width='70px';cal.placeholder='40A';
+    const sens=el('input');sens.type='text';sens.value=dd.sens||'';sens.style.width='76px';sens.placeholder='30mA';
+    const typ=el('select');typ.style.width='74px';typ.title='Type de différentiel';
+    [['','—'],['AC','AC'],['A','A'],['F','F'],['B','B']].forEach(([val,lab])=>{const o=el('option',null,lab);o.value=val;if((dd.typ||'')===val)o.selected=true;typ.append(o);});
+    const obs=el('input','ids');obs.type='text';obs.value=dd.obs||'';obs.placeholder='Repère (ex. Tête 400V triphasé)';
+    const st=el('select');st.style.width='78px';
+    [['on','ON'],['off','OFF']].forEach(([val,lab])=>{const o=el('option',null,lab);o.value=val;if((dd.s||'on')===val)o.selected=true;st.append(o);});
+    const del=el('button','x','✕');
+    nm.oninput=()=>{dd.nm=nm.value;markDirty();};
+    cal.oninput=()=>{dd.cal=cal.value;markDirty();};
+    sens.oninput=()=>{dd.sens=sens.value;markDirty();};
+    obs.oninput=()=>{dd.obs=obs.value;markDirty();};
+    typ.onchange=()=>{dd.typ=typ.value;markDirty();openBoard(code,true);};
+    st.onchange=()=>{setDiffState(code,dd.id,st.value);openBoard(code,true);};
+    del.onclick=()=>{
+      const nb=djList(code).filter(x=>x.gid===dd.id).length;
+      if(confirm('Supprimer « '+(dd.nm||'ce différentiel')+' » ?'+(nb?'\n\n'+nb+' disjoncteur(s) ne seront plus rattachés à aucun différentiel. Ils ne sont pas supprimés.':'')))
+        {list.splice(i,1);markDirty();openBoard(code,true);}
+    };
+    row.append(nm,cal,sens,typ,obs,st,del);wrap.append(row);
+  });
+  const add=el('button','btn ghost sm','＋ Ajouter un différentiel');
+  add.onclick=()=>{let i=1;while(list.some(x=>x.id==='d'+i))i++;
+    list.push({id:'d'+i,nm:'Différentiel '+(list.length+1),cal:'',sens:'',typ:'',obs:'',s:'on'});
+    markDirty();openBoard(code,true);};
+  wrap.append(add);
+  return wrap;
+}
+
 /* éditeur des disjoncteurs d'un tableau */
 function buildDjEditor(code){
   const wrap=el('div','block');
   wrap.append(el('h4',null,'Disjoncteurs du tableau (édition)'));
-  wrap.append(el('div','hint','Modifiez n°, groupe, type/calibre, état et ce qu\'il alimente. Utilisez <b>▲▼</b> pour réordonner un disjoncteur. Pour relier des disjoncteurs en <b>triphasé</b>, donnez-leur le même nom de <b>bloc 3~</b> (ex. « 2E ») — ils apparaîtront encadrés ensemble sur le schéma (à condition d\'être consécutifs). Laissez vide pour du monophasé.'));
+  wrap.append(el('div','hint','Modifiez n°, différentiel, type (modèle / calibre / tension), état et ce qu\'il alimente. Utilisez <b>▲▼</b> pour réordonner un disjoncteur. Pour relier des disjoncteurs en <b>triphasé</b>, donnez-leur le même nom de <b>bloc 3~</b> (ex. « 2E ») — ils apparaîtront encadrés ensemble sur le schéma (à condition d\'être consécutifs). Laissez vide pour du monophasé.'));
   const list=djList(code);
   const head=el('div','edit-row');head.style.cssText='font-size:.7rem;color:var(--mut);font-weight:700;text-transform:uppercase';
-  head.innerHTML='<span style="width:64px">N°</span><span style="width:140px">Groupe / diff.</span><span style="width:84px">Type</span><span style="width:80px">État</span><span style="width:72px">Bloc 3~</span><span style="flex:1;min-width:110px">Alimente</span><span style="width:28px"></span>';
+  head.innerHTML='<span style="width:64px">N°</span><span style="width:150px">Différentiel</span><span style="width:84px">Modèle</span><span style="width:72px">Calibre</span><span style="width:72px">Tension</span><span style="width:80px">État</span><span style="width:72px">Bloc 3~</span><span style="flex:1;min-width:110px">Alimente</span><span style="width:28px"></span>';
   wrap.append(head);
   list.forEach((d,i)=>{
     const row=el('div','edit-row');
     const n=el('input');n.type='text';n.value=d.n;n.style.width='64px';n.placeholder='8';
-    const g=el('input');g.type='text';g.value=d.g||'';g.style.width='140px';g.placeholder='Différentiel';
-    const k=el('input');k.type='text';k.value=d.k||'';k.style.width='84px';k.placeholder='DPN C16';
+    const g=el('select');g.style.width='150px';g.title='Différentiel qui protège ce disjoncteur';
+    {const o=el('option',null,'— aucun —');o.value='';if(!d.gid)o.selected=true;g.append(o);}
+    diffList(code).forEach(dd=>{const o=el('option',null,dd.nm||dd.id);o.value=dd.id;if(d.gid===dd.id)o.selected=true;g.append(o);});
+    const km=el('input');km.type='text';km.value=d.km||'';km.style.width='84px';km.placeholder='C60N';km.title='Modèle (C60N, DPN, Déclic…)';
+    const kc=el('input');kc.type='text';kc.value=d.kc||'';kc.style.width='72px';kc.placeholder='C16';kc.title='Calibre / courbe (C10, C16, C32…)';
+    const kv=el('input');kv.type='text';kv.value=d.kv||'';kv.style.width='72px';kv.placeholder='230V';kv.title='Tension (230V, 400V…)';
     const s=el('select');s.style.width='80px';
     [['on','ON'],['off','OFF'],['libre','Libre']].forEach(([val,lab])=>{const o=el('option',null,lab);o.value=val;if(d.s===val)o.selected=true;s.append(o);});
     const tri=el('input');tri.type='text';tri.value=d.tri||'';tri.style.width='72px';tri.placeholder='—';tri.title='Bloc triphasé : même nom = reliés';
@@ -905,18 +1047,22 @@ function buildDjEditor(code){
     const down=el('button','mv','▼');down.title='Descendre';down.disabled=i===list.length-1;
     const del=el('button','x','✕');
     n.oninput=()=>{d.n=n.value;markDirty();};
-    g.oninput=()=>{d.g=g.value;markDirty();};
-    k.oninput=()=>{d.k=k.value;markDirty();};
+    g.onchange=()=>{d.gid=g.value;const dd=diffById(code,g.value);d.g=dd?(dd.nm||''):'';markDirty();openBoard(code,true);};
+    km.oninput=()=>{d.km=km.value;markDirty();};
+    kc.oninput=()=>{d.kc=kc.value;markDirty();};
+    kv.oninput=()=>{d.kv=kv.value;markDirty();};
     s.onchange=()=>{d.s=s.value;markDirty();openBoard(code,true);};
     tri.onchange=()=>{const val=tri.value.trim();if(val)d.tri=val;else delete d.tri;markDirty();openBoard(code,true);};
     f.oninput=()=>{d.f=f.value;markDirty();};
     up.onclick=()=>{[list[i-1],list[i]]=[list[i],list[i-1]];markDirty();openBoard(code,true);};
     down.onclick=()=>{[list[i+1],list[i]]=[list[i],list[i+1]];markDirty();openBoard(code,true);};
     del.onclick=()=>{if(confirm('Supprimer le disjoncteur D'+d.n+' ?')){list.splice(i,1);markDirty();openBoard(code,true);}};
-    row.append(n,g,k,s,tri,f,up,down,del);wrap.append(row);
+    row.append(n,g,km,kc,kv,s,tri,f,up,down,del);wrap.append(row);
   });
   const add=el('button','btn ghost sm','＋ Ajouter un disjoncteur');
-  add.onclick=()=>{const last=list[list.length-1];list.push({n:'?',g:last?last.g:'',k:'',s:'on',f:''});markDirty();openBoard(code,true);};
+  add.onclick=()=>{const last=list[list.length-1];
+    list.push({n:'?',gid:last?(last.gid||''):'',g:last?(last.g||''):'',km:'',kc:'',kv:'230V',s:'on',f:''});
+    markDirty();openBoard(code,true);};
   wrap.append(add);
   return wrap;
 }
@@ -929,6 +1075,8 @@ function renderAudit(){
   const activeFaults=FAULTS_DEFAULT.filter(f=>!STATE.faultsDone[f.room+f.t]).length;
   const stats=el('div','grid audit-grid');
   stats.append(el('div','stat red',`<div class="n">${activeFaults}</div><div class="l">Pannes actives</div>`));
+  let diffOff=0;Object.keys(BOARDS).forEach(c=>{diffOff+=diffList(c).filter(x=>x.s==='off').length;});
+  stats.append(el('div','stat red',`<div class="n">${diffOff}</div><div class="l">Différentiels coupés</div>`));
   stats.append(el('div','stat amber',`<div class="n">${off}</div><div class="l">Disjoncteurs coupés (OFF)</div>`));
   stats.append(el('div','stat',`<div class="n">${lib}</div><div class="l">Emplacements libres</div>`));
   stats.append(el('div','stat',`<div class="n">${INCONSISTENCIES.length}</div><div class="l">Incohérences entre docs</div>`));
@@ -946,8 +1094,11 @@ function renderAudit(){
   v.append(b1);
   b1.querySelectorAll('.loc').forEach(a=>a.onclick=()=>openRoom(a.dataset.room));
 
-  const b2=el('div','block card');b2.append(el('h4',null,'🟠 Disjoncteurs coupés / libres (état actuel)'));
+  const b2=el('div','block card');b2.append(el('h4',null,'🟠 Différentiels & disjoncteurs coupés / libres (état actuel)'));
   Object.keys(BOARDS).forEach(code=>{
+    diffList(code).forEach(dd=>{if(dd.s!=='off')return;
+      const it=el('div','audit-item',`<span class="b">🔴</span><div><b>${dd.nm||dd.id}</b> · <span class="loc" data-tb="${code}">${code}</span> · <span class="tag off">LIGNE COUPÉE</span> — toute la ligne est hors tension</div>`);
+      b2.append(it);});
     djList(code).forEach(d=>{const s=d.s;if(s==='on')return;
       const it=el('div','audit-item',`<span class="b">${s==='off'?'🟠':'⚪'}</span><div><b>D${d.n}</b> · <span class="loc" data-tb="${code}">${code}</span> · <span class="tag ${s}">${s.toUpperCase()}</span> — ${d.f}</div>`);
       b2.append(it);});
@@ -1049,7 +1200,7 @@ function buildIndex(){
   Object.entries(BOARDS).forEach(([c,b])=>{
     idx.push({kind:"Tableau",ic:"🔌",t:c+" — "+b.nm,d:"📍 "+b.loc,blob:(c+' '+b.nm+' '+b.loc+' '+b.spec).toLowerCase(),act:()=>openBoard(c)});
     djList(c).forEach(d=>idx.push({kind:"Disjoncteur",ic:"⚡",t:"D"+d.n+" ("+c+")",d:d.f,
-      blob:("d"+d.n+' '+c+' '+d.f+' '+(d.k||'')).toLowerCase(),act:()=>openBoard(c)}));
+      blob:("d"+d.n+' '+c+' '+d.f+' '+djType(d)).toLowerCase(),act:()=>openBoard(c)}));
   });
   return idx;
 }
@@ -1063,6 +1214,61 @@ function search(q){
   res.innerHTML='';
   hits.forEach(({it})=>{const d=el('div','res',`<div class="ic">${it.ic}</div><div><div class="t">${it.t}</div><div class="d">${it.d}</div></div><div class="kind">${it.kind}</div>`);
     d.onclick=it.act;res.append(d);});
+}
+/* ============================ ACCUEIL / TABLEAU DE BORD ============================ */
+function renderHome(){
+  const v=$('#view-home');if(!v)return;v.innerHTML='';
+  v.append(el('h2','section','📊 Tableau de bord — '+STATE.house.name));
+
+  /* Recherche rapide */
+  const qs=el('div','card');qs.style.marginBottom='14px';
+  qs.append(el('div','hint','Recherche rapide — appareil, prise, disjoncteur ou pièce :'));
+  const qrow=el('div');qrow.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+  const qin=el('input');qin.type='search';qin.placeholder='Ex. congélateur, D9, cuisine…';qin.style.cssText='flex:1;min-width:180px';
+  const go=q=>{$('#q').value=q;gotoTab('search');search(q);};
+  qin.addEventListener('keydown',e=>{if(e.key==='Enter')go(qin.value);});
+  const qbtn=el('button','btn','Chercher');qbtn.onclick=()=>go(qin.value);
+  qrow.append(qin,qbtn);qs.append(qrow);
+  const sug=el('div');sug.style.marginTop='10px';
+  [["Congélateur","congélateur"],["Lave-linge","lave-linge"],["Moteur piscine","moteur piscine"],["Box internet","boîtier internet"],["Tableau TSS","TSS"]].forEach(([l,q])=>{
+    const c=el('span','chip',l);c.style.cssText='cursor:pointer;margin:0 6px 6px 0';c.onclick=()=>go(q);sug.append(c);});
+  qs.append(sug);v.append(qs);
+
+  /* État de l'installation */
+  let off=0,lib=0;Object.keys(BOARDS).forEach(c=>{const s=boardStats(c);off+=s.off;lib+=s.lib;});
+  const activeF=FAULTS_DEFAULT.filter(f=>!STATE.faultsDone[f.room+f.t]);
+  const b0=el('div','block');b0.append(el('h4',null,'État de l\'installation'));
+  const stats=el('div','grid audit-grid');
+  const mk=(cls,n,l,tab)=>{const s=el('div','stat'+(cls?' '+cls:''),`<div class="n">${n}</div><div class="l">${l}</div>`);s.style.cursor='pointer';s.onclick=()=>gotoTab(tab);return s;};
+  stats.append(mk('red',activeF.length,'Pannes actives','audit'));
+  stats.append(mk('amber',off,'Disjoncteurs coupés','audit'));
+  stats.append(mk('',lib,'Emplacements libres','audit'));
+  stats.append(mk('',STATE.rooms.length,'Pièces','rooms'));
+  b0.append(stats);v.append(b0);
+
+  /* Pannes à surveiller */
+  const fb=el('div','block card');fb.append(el('h4',null,'🔴 Pannes à surveiller'));
+  if(activeF.length){
+    activeF.slice(0,8).forEach(f=>{const r=ROOM_BY_CODE[f.room];
+      fb.append(el('div','audit-item',`<span class="b">🔴</span><div><span class="loc" data-room="${f.room}">${r?r.nm:f.room}</span> — ${f.t}</div>`));});
+    if(activeF.length>8)fb.append(el('div','hint','+ '+(activeF.length-8)+' autre(s) — voir l\'onglet Audit.'));
+    fb.querySelectorAll('.loc').forEach(a=>a.onclick=()=>openRoom(a.dataset.room));
+  } else fb.append(el('div','hint','Aucune panne en cours 🎉'));
+  v.append(fb);
+
+  /* Inventaire */
+  const ib=el('div','block card');ib.append(el('h4',null,'📊 Inventaire'));
+  const ig=el('div','grid audit-grid');
+  TOTALS.forEach(([nm,n])=>ig.append(el('div','stat',`<div class="n">${n}</div><div class="l">${nm}</div>`)));
+  ib.append(ig);v.append(ib);
+
+  /* Accès rapides */
+  const qb=el('div','block card');qb.append(el('h4',null,'Accès rapides'));
+  const grid=el('div','grid');grid.style.gridTemplateColumns='repeat(auto-fill,minmax(150px,1fr))';
+  [['🔎 Recherche','search'],['🏠 Pièces','rooms'],['🔌 Tableaux','boards'],['🗺️ Plan','plan'],['⚠️ Audit','audit'],['⚙️ Réglages','settings']].forEach(([l,t])=>{
+    const b=el('button','btn ghost',l);b.style.padding='14px';b.onclick=()=>gotoTab(t);grid.append(b);});
+  qb.append(grid);v.append(qb);
+  window.scrollTo(0,0);
 }
 function renderSuggested(){
   const res=$('#results');res.innerHTML='';
@@ -1321,7 +1527,7 @@ function setupLock(){
   if(!STATE.plans)STATE.plans={};
   migratePlans();
   const th=localStorage.getItem('elec_theme');if(th)document.body.dataset.theme=th;
-  rebuild();updateHeader();renderSuggested();
+  rebuild();updateHeader();renderSuggested();renderHome();
   if(!locked)maybeHelp();
   if('serviceWorker' in navigator)
     navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
