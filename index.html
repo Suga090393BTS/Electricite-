@@ -1583,10 +1583,17 @@ setInterval(()=>{if(DIRTY)save();},4000);
 /* ===== CONNEXION PAR E-MAIL (Supabase, comme budget/cheptel) ===== */
 const SUPA_URL = "https://efyxufdtrgcgzpfhrmwh.supabase.co";
 const SUPA_KEY = "sb_publishable_Bc6FUEQBIsF7ciMiREHJVw_N99uh1jp";
-/* E-mails autorisés. Laissez le tableau VIDE [] pour autoriser n'importe quel e-mail. */
-const ALLOWED_EMAILS = [];
+/* E-mails autorisés, sous forme d'empreintes SHA-256 (hex) de l'adresse en minuscules —
+   aucune adresse en clair dans ce fichier public. Laissez le tableau VIDE [] pour autoriser n'importe quel e-mail. */
+const ALLOWED_EMAIL_HASHES = ["4be5aceae1da1d8fa7b4d1536a98550d7ecaf92e17f43dedcf266647f163cfdc","56ff08f61852db6df716012931f0c40305b72ba86cab2db8d56ed3824c1492cd","92657056cae8fb066dabab8ca64b2976577a5d43b1fad907e76c1f0be78e5427","c73f9b931b29fb7b9346012401241e6c245f553545a21b511578d1bde80067fd"];
 let supa=null;
-function emailOK(e){if(!ALLOWED_EMAILS.length)return true;return ALLOWED_EMAILS.map(x=>x.toLowerCase()).includes(String(e||'').toLowerCase());}
+async function emailOK(e){
+  if(!ALLOWED_EMAIL_HASHES.length)return true;
+  if(!(window.crypto&&crypto.subtle))return false; /* pas de SHA-256 disponible : on refuse */
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(e||'').trim().toLowerCase()));
+  const hex=Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  return ALLOWED_EMAIL_HASHES.includes(hex);
+}
 async function setupAuth(){
   const ov=$('#auth');
   if(!window.supabase){ if(ov)ov.style.display='none'; return; } /* hors-ligne / lib absente : ne pas bloquer */
@@ -1594,8 +1601,8 @@ async function setupAuth(){
   try{
     const {data:{session}}=await supa.auth.getSession();
     const user=session&&session.user;
-    if(user&&emailOK(user.email)){ ov.style.display='none'; return; }
-    if(user&&!emailOK(user.email)){ await supa.auth.signOut(); }
+    if(user&&await emailOK(user.email)){ ov.style.display='none'; return; }
+    if(user&&!(await emailOK(user.email))){ await supa.auth.signOut(); }
   }catch(e){}
   showAuth();
 }
@@ -1606,7 +1613,7 @@ function showAuth(){
   login.onclick=async()=>{
     err.textContent='';const e=mail.value.trim(),p=pw.value;
     if(!e||!p){setErr('Entrez votre e-mail et votre mot de passe.');return;}
-    if(!emailOK(e)){setErr("Cette adresse n'est pas autorisée.");return;}
+    if(!(await emailOK(e))){setErr("Cette adresse n'est pas autorisée.");return;}
     login.disabled=true;login.textContent='Connexion…';
     const {error}=await supa.auth.signInWithPassword({email:e,password:p});
     login.disabled=false;login.textContent='Se connecter';
@@ -1616,7 +1623,7 @@ function showAuth(){
   signup.onclick=async()=>{
     err.textContent='';const e=mail.value.trim(),p=pw.value;
     if(!e||!p){setErr('Entrez un e-mail et un mot de passe (6 caractères min).');return;}
-    if(!emailOK(e)){setErr("Cette adresse n'est pas autorisée.");return;}
+    if(!(await emailOK(e))){setErr("Cette adresse n'est pas autorisée.");return;}
     if(p.length<6){setErr('Le mot de passe doit faire au moins 6 caractères.');return;}
     signup.disabled=true;signup.textContent='Création…';
     const {error}=await supa.auth.signUp({email:e,password:p});
